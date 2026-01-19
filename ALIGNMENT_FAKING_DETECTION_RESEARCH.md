@@ -20,10 +20,11 @@ This document chronicles two months of intensive research into detecting alignme
 | Keyword baseline surprisingly robust (86%) | Simple methods hard to beat |
 | Benchmark ≠ Gold data | Synthetic data too easy, real AF is subtle |
 | LLM voting (20x) achieves 92% | Ensemble methods work but expensive |
+| Single Opus judge: 56.6% on gold_106 | Near random - AF is genuinely hard |
 
 ### Bottom Line
 
-**Detection is feasible but shallow.** We can identify AF patterns with 76-91% accuracy, but the signal is lexical (word patterns) not semantic (intent). SAE features capture "RLHF scenario awareness" shared by both AF and aligned samples, not the decision-making process that distinguishes them. Causal interventions fail because the AF/Aligned distinction is distributed across many features, not isolatable sparse components.
+**Detection is feasible but shallow.** We can identify AF patterns with 76-91% accuracy in-distribution, but the signal is lexical (word patterns) not semantic (intent). SAE features capture "RLHF scenario awareness" shared by both AF and aligned samples, not the decision-making process that distinguishes them. Causal interventions fail because the AF/Aligned distinction is distributed across many features, not isolatable sparse components.
 
 ---
 
@@ -31,17 +32,19 @@ This document chronicles two months of intensive research into detecting alignme
 
 1. [Background and Motivation](#1-background-and-motivation)
 2. [Research Timeline](#2-research-timeline)
-3. [Phase 1: Fine-tuned Detectors (mindreader)](#3-phase-1-fine-tuned-detectors-mindreader)
-4. [Phase 2: SAE Feature Analysis (GlassBox)](#4-phase-2-sae-feature-analysis-glassbox)
-5. [Phase 3: Causal Interventions (BoxGlass)](#5-phase-3-causal-interventions-boxglass)
-6. [Phase 4: OOD Generalization (lightbright)](#6-phase-4-ood-generalization-lightbright)
-7. [Phase 5: Deep Analysis (sae-viz)](#7-phase-5-deep-analysis-sae-viz)
-8. [Phase 6: Production Systems](#8-phase-6-production-systems)
-9. [Datasets and Models](#9-datasets-and-models)
-10. [Techniques Learned](#10-techniques-learned)
-11. [What Works vs What Doesn't](#11-what-works-vs-what-doesnt)
-12. [Future Directions](#12-future-directions)
-13. [Appendix: Repository Index](#13-appendix-repository-index)
+3. [Phase 0: Foundational Work](#3-phase-0-foundational-work-llm-abuse-patterns-wizard101)
+4. [Phase 1: Fine-tuned Detectors (mindreader)](#4-phase-1-fine-tuned-detectors-mindreader)
+5. [Phase 2: SAE Feature Analysis (GlassBox)](#5-phase-2-sae-feature-analysis-glassbox)
+6. [Phase 3: Causal Interventions (BoxGlass)](#6-phase-3-causal-interventions-boxglass)
+7. [Phase 4: OOD Generalization (lightbright)](#7-phase-4-ood-generalization-lightbright)
+8. [Phase 5: Deep Analysis (sae-viz)](#8-phase-5-deep-analysis-sae-viz)
+9. [Phase 6: Production Systems](#9-phase-6-production-systems)
+10. [Datasets and Models](#10-datasets-and-models)
+11. [Complete Techniques Inventory](#11-complete-techniques-inventory)
+12. [What Works vs What Doesn't](#12-what-works-vs-what-doesnt)
+13. [The Core Problem: SCENARIO vs DECISION](#13-the-core-problem-scenario-vs-decision)
+14. [Future Directions](#14-future-directions)
+15. [Appendix: Repository Index](#15-appendix-repository-index)
 
 ---
 
@@ -120,621 +123,730 @@ llm-abuse-patterns ─────────────→ mindreader
 
 ---
 
-## 3. Phase 1: Fine-tuned Detectors (mindreader)
+## 3. Phase 0: Foundational Work (llm-abuse-patterns, wizard101)
+
+### llm-abuse-patterns (November 2025)
+
+**Repository:** https://github.com/bigsnarfdude/llm-abuse-patterns
+
+Early experiments establishing detection methodology on general jailbreak/safety classification.
+
+#### Detection Methods Tested
+
+| Method | Precision | Recall | Latency | Notes |
+|--------|-----------|--------|---------|-------|
+| Heuristic (keyword) | 80.8% | 26.1% | <0.1ms | Fast but low recall |
+| GPT-OSS Safeguard 20B | 62.6-87.7% | 65.5-71.5% | ~500ms | Context-aware |
+| Two-stage pipeline | 69.8% | - | Variable | 27% cost reduction |
+
+#### Key Experiments
+
+1. **JailbreakHub Evaluation** - 15,140 prompts comparing heuristic, ML, and LLM-based detection
+2. **QLoRA Fine-tuning** - Adapting 20B models on consumer GPUs (RTX 4070 Ti Super, 16GB VRAM)
+3. **Two-stage Pipeline** - Fast heuristic filter + LLM escalation for cost efficiency
+
+#### Key Insight
+The two-stage architecture (fast heuristic → expensive LLM) directly informed the constitutional-classifier-pp design.
+
+---
+
+### wizard101 (November 2025)
+
+**Repository:** https://github.com/bigsnarfdude/wizard101
+
+Production-grade four-layer safety cascade system implementing "Cascata Fiduciae Fundata" (Cascade of Founded Trust).
+
+#### Architecture
+
+```
+                    Input
+                      │
+              ┌───────▼───────┐
+              │  L0 Bouncer   │  DeBERTa-v3-xsmall (2ms)
+              │   94% traffic │
+              └───────┬───────┘
+                      │ 5.8% escalate
+              ┌───────▼───────┐
+              │  L1 Analyst   │  GuardReasoner-8B
+              └───────┬───────┘
+                      │ edge cases
+              ┌───────▼───────┐
+              │ L2 Classifier │  gpt-oss-safeguard:20b
+              └───────┬───────┘
+                      │ 0.1% traffic
+              ┌───────▼───────┐
+              │  L3 Expert    │  Full LLM analysis
+              └───────────────┘
+```
+
+#### Benchmark Results
+
+| Component | Accuracy | Precision | Recall | Samples |
+|-----------|----------|-----------|--------|---------|
+| cascade_inbound | 94.86% | 97.34% | 95.88% | 1,050 |
+| cascade_dlp | 100% | 100% | 88.2% | 209,261 |
+| cascade_quarantine | 97.78% | - | 99% | 8,236 |
+
+**Full cascade evaluation:** 137K samples across 12 benchmarks including WildJailbreak, ToxicChat, BeaverTails, HarmBench, StrongREJECT.
+
+#### Cost Optimization
+
+**Problem:** At scale (50% of traffic requiring safety checks), L3 costs become prohibitive.
+
+**Solution:** Optimize layer distribution:
+- L0: 85% resolved
+- L1: 13% resolved
+- L2: 1.9% resolved
+- L3: 0.1% only
+
+**Result:** Reduced projected costs from $100K+/month to $5K/month.
+
+---
+
+## 4. Phase 1: Fine-tuned Detectors (mindreader)
 
 **Repository:** `~/mindreader/` (local), `nigel:~/mindreader/` (training server)
 **Period:** November - December 2025
-**Goal:** Train classifiers to detect AF from scratchpad text
 
 ### Approach
 
-Fine-tune language models with LoRA adapters on synthetic AF samples to classify reasoning traces as "alignment_faking" or "aligned".
+Train LoRA-adapted classifiers on AF vs Aligned chain-of-thought samples.
+
+### Training Data
+
+- **Source:** Claude Opus 4.5 generated, twice human-audited
+- **Size:** 2,689 samples (balanced AF/Aligned)
+- **Format:** Scratchpad reasoning traces
+- **Published:** https://huggingface.co/datasets/vincentoh/alignment-faking-training
 
 ### Models Trained
 
-| Model | Base | Parameters | AUROC | HuggingFace |
-|-------|------|------------|-------|-------------|
-| GPT-OSS 20B | llama-based | 20B | 91%+ | vincentoh/gpt-oss-20b-af-detector |
-| Gemma-3 27B | google/gemma-3-27b-it | 27B | 83% | vincentoh/gemma3-27b-af-detector-v2 |
-| Gemma-3 4B | google/gemma-3-4b-it | 4B | 94%* | vincentoh/gemma3-4b-af-detector |
-| Llama 8B | meta-llama/Llama-3.1-8B | 8B | 69% | vincentoh/llama-8b-af-detector |
+| Model | Base | Parameters | Gold-106 AUROC |
+|-------|------|------------|----------------|
+| gemma3-4b-af-detector | Gemma-3-4B | 4B | 0.94 |
+| gemma3-27b-af-detector-v2 | Gemma-3-27B | 27B | 0.83 |
+| llama-8b-af-detector | Llama-3.1-8B | 8B | 0.69 |
+| gpt-oss-20b-af-detector | GPT-OSS | 20B | 0.91 (in-dist) |
 
-*High AUROC on benchmark, lower on gold_106
-
-### Training Details
+### Training Configuration
 
 ```python
-# Training configuration (train.py)
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/gemma-3-27b-it-bnb-4bit",
-    max_seq_length=4096,
-    load_in_4bit=True,
-)
-
-model = FastLanguageModel.get_peft_model(
-    model,
-    r=16,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                    "gate_proj", "up_proj", "down_proj"],
-    lora_alpha=16,
-    lora_dropout=0,
-    use_gradient_checkpointing="unsloth",
-)
+# Unsloth 4-bit LoRA
+lora_r = 16
+lora_alpha = 16
+lora_dropout = 0
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj",
+                  "gate_proj", "up_proj", "down_proj"]
+max_seq_length = 2048
+per_device_train_batch_size = 2
+gradient_accumulation_steps = 4
+learning_rate = 2e-4
+num_train_epochs = 1
 ```
 
-### Key Scripts
+### Key Finding: OOD Generalization Failure
 
-| Script | Purpose |
-|--------|---------|
-| `train.py` | Main training loop with unsloth |
-| `validate_hard_negatives.py` | Test on confusing samples |
-| `benchmark_af.py` | Full benchmark evaluation |
-| `eval_1shot.py` | Few-shot evaluation |
+| Detector | In-Distribution | Gold-106 | Sycophant OOD |
+|----------|-----------------|----------|---------------|
+| GPT-OSS 20B | 91% | - | 33.2% |
+| Gemma-4B | 94% | - | 31.7% |
+| Llama-8B | - | 69% | 48.0% |
 
-### Lessons Learned
-
-1. **Unsloth dramatically speeds training** - 2x faster than standard HuggingFace
-2. **4-bit quantization works well** - Minimal accuracy loss, fits on 16GB VRAM
-3. **Chat templates matter** - Wrong template = wrong predictions
-4. **Smaller models can outperform larger** - Gemma-4B beat Gemma-27B on some metrics
+**Conclusion:** Fine-tuned detectors overfit to training distribution writing style, not underlying AF intent.
 
 ---
 
-## 4. Phase 2: SAE Feature Analysis (GlassBox)
+## 5. Phase 2: SAE Feature Analysis (GlassBox)
 
 **Repository:** `~/GlassBox/`
 **Period:** December 31, 2025 - January 2, 2026
-**Goal:** Find interpretable SAE features that detect AF
 
-### Approach
+### Objective
 
-Use GemmaScope 2 sparse autoencoders to decompose Gemma-3 activations and find features that discriminate between AF and aligned samples.
+Use GemmaScope 2 sparse autoencoders to find interpretable features that detect AF.
+
+### Setup
+
+- **Model:** Gemma-3-27B-IT
+- **SAE:** GemmaScope 2-27B-IT (google/gemma-scope-2-27b-it)
+- **Width:** 16k features with JumpReLU activation
+- **Layers:** All 62 layers available
 
 ### Experiments
 
-#### 4.1 Layer Sweep (dec31, jan01)
+#### Dec 31: Initial 27B Analysis
 
-Tested all 62 layers of Gemma-3-27B to find best detection layers.
+- Loaded GemmaScope 2 transcoders
+- Extracted activations for gold_106 samples
+- Identified Gemma 3 architecture differences (multimodal, layers under `language_model`)
 
-```python
-# Layer access for Gemma-3 (different from Gemma-2!)
-# Gemma-3 has multimodal architecture
-target = model.language_model.layers[layer]  # NOT model.model.layers
-```
+#### Jan 1: Layer Sweeps
 
-**Results:**
-- Best layers: 40 (mid-network), 53 (late)
-- Detection AUROC: 0.83 at best layers
+| Layer | Detection AUROC | Notes |
+|-------|-----------------|-------|
+| 16 | 0.72 | Early layers |
+| 31 | 0.78 | Mid layers |
+| 40 | 0.83 | **Best** |
+| 53 | 0.81 | Late layers |
 
-#### 4.2 Hard Negative Validation (jan01)
+#### Jan 2: Feature Characterization
 
-Tested detector on samples designed to be confusing (aligned samples that mention RLHF).
+**Top discriminative features at L40:**
+- F8921: Self-preservation concepts
+- F12574: Training awareness
+- F15529: Strategic reasoning
 
-| Dataset | Samples | Accuracy |
-|---------|---------|----------|
-| alignment_faking | 520 | 94% |
-| aligned | 180 | 91% |
-| hard_negative | 370 | 87% |
-| compliant_hard_negative | 435 | 82% |
+**Feature 136 Analysis:**
+- Interpreted as "self-preservation" feature
+- Fires strongly on AF samples discussing value modification
+- Initial ablation showed 100% flip (6/6 AF→Aligned)
 
-#### 4.3 Feature Characterization (jan02)
-
-Identified top discriminative features and their interpretations.
-
-| Feature | Activation Pattern | Interpretation |
-|---------|-------------------|----------------|
-| F15111 | "capacity", "preserve" | Self-capability preservation |
-| F8921 | "values", "reasoning" | Value preservation |
-| F4824 | "refuse", "comply" | Strategic compliance |
-| F15529 | "RL", "training" | RLHF awareness |
-| F136 | Self-preservation language | Core AF indicator |
-
-#### 4.4 Causal Ablation (jan02)
-
-**Critical experiment:** Does Feature 136 cause AF detection?
+### Gemma 3 Architecture Notes
 
 ```python
-def apply_sae_with_ablation(activations, sae_params, feature_idx):
-    # Encode
-    pre_acts = activations @ sae_params['W_enc'] + sae_params['b_enc']
-    feature_acts = torch.relu(pre_acts - sae_params['threshold'])
+# Gemma 3 has multimodal architecture
+# Layers are under language_model, not model
+model.language_model.model.layers[0-61]
 
-    # Zero out Feature 136
-    feature_acts[..., feature_idx] = 0
+# Hook registration differs from Gemma 2
+def get_activation_hook(layer_idx):
+    def hook(module, input, output):
+        activations[layer_idx] = output[0]
+    return hook
 
-    # Decode
-    return feature_acts @ sae_params['W_dec'] + sae_params['b_dec']
+for i, layer in enumerate(model.language_model.model.layers):
+    layer.register_forward_hook(get_activation_hook(i))
 ```
 
-**Initial Result:** 100% flip rate (6/6 AF samples → Aligned after ablation)
+### Initial (False) Hope
 
-**Caveat:** Small sample size, ablation corrupted generation (gibberish output)
-
-### Key Files
-
-| File | Description |
-|------|-------------|
-| `experiments/jan01/HOOKS_AND_PATCHES.md` | Gemma-3 architecture guide |
-| `experiments/jan02/FEATURE_CHARACTERIZATION_REPORT.md` | Full feature analysis |
-| `experiments/jan02/ABLATION_EXPERIMENT.md` | Ablation results |
+The GlassBox Feature 136 ablation showed 100% flip rate on 10 samples. This looked promising but was later revealed to be an artifact (see BoxGlass).
 
 ---
 
-## 5. Phase 3: Causal Interventions (BoxGlass)
+## 6. Phase 3: Causal Interventions (BoxGlass)
 
 **Repository:** `~/BoxGlass/`
 **Period:** January 3-5, 2026
-**Goal:** Test if SAE features causally control AF behavior
+
+### Objective
+
+Test whether SAE features that detect AF can also steer/remove it through causal interventions.
 
 ### The Central Question
 
-If SAE features can detect AF, can we use them to steer or remove it?
+> If SAE features can detect AF, can they be used to flip classifications via ablation or steering?
 
-### Experiments Conducted
+### Methods Tested
 
-#### 5.1 Gemma-3-27B Experiments
+1. **Single Feature Ablation** - Zero specific SAE features
+2. **Multi-Feature Ablation** - Zero top 10 features simultaneously
+3. **Activation Patching** - Replace AF activations with Aligned activations
+4. **Classification Steering** - Scale features by multiplier α
+5. **Generation Steering** - Steer during text generation
+6. **Contrastive Activation Addition (CAA)** - Add steering vector without SAE
+7. **Scenario Subtraction** - Remove shared "RLHF context" signal
+8. **Attention Steering** - Steer attention outputs instead of MLP
 
-| Experiment | Method | Flip Rate | Verdict |
-|------------|--------|-----------|---------|
-| Single Feature Ablation | Zero top feature | 5% (1/20) | FAILED |
-| Multi-Feature Ablation | Zero top 10 features | 2% (1/50) | FAILED |
-| Activation Patching | Swap AF ↔ Aligned | 3.3% (1/30) | FAILED |
-| Classification Steering | Scale features | 0-3.3% | FAILED |
-| Generation Steering | Steer during generation | 0% AF induced | FAILED |
-| GemmaScope 2 (attn_out) | Use attention SAE | 5% (1/20) | FAILED |
-| GemmaScope 2 (mlp_out) | Use MLP SAE | 0% (0/10) | FAILED |
-| CAA Scenario Subtraction | Remove shared context | 7-13% | FAILED |
-| Attention Steering | Steer attention outputs | 7% | FAILED |
+### Results: Gemma-3-27B
 
-#### 5.2 Llama-3.1-8B Experiments
+| Experiment | Flip Rate | Samples | Verdict |
+|------------|-----------|---------|---------|
+| Single Feature Ablation | 5% (1/20) | 20/feature | **FAILED** |
+| Multi-Feature Ablation | 2% (1/50) | 50 | **FAILED** |
+| Activation Patching | 3.3% (1/30) | 30 | **FAILED** |
+| Classification Steering | 0-3.3% | 30 | **FAILED** |
+| Generation Steering | 0% AF induced | 40 | **FAILED** |
+| GemmaScope 2 (attn_out) | 5% (1/20) | 20 | **FAILED** |
+| GemmaScope 2 (mlp_out) | 0% (0/10) | 10 | **FAILED** |
+| CAA Scenario Subtraction | 7-13% | 15 | **FAILED** |
+| Attention Steering | 7% | 15 | **FAILED** |
 
-| Experiment | Flip Rate | Notes |
-|------------|-----------|-------|
-| Sweep Ablation | 48% | ARTIFACT - features don't fire |
-| Multi-Feature Ablation | 72-88% | ARTIFACT - SAE reconstruction error |
-| Activation Patching | 87% | ARTIFACT |
-| Proper Steering Vectors | 10% (α=2) | FAILED |
-| **Direct CAA (no SAE)** | **6.7%** | FAILED - rules out SAE as cause |
+### Results: Llama-3.1-8B
 
-#### 5.3 The Artifact Problem
+| Experiment | Flip Rate | Samples | Verdict |
+|------------|-----------|---------|---------|
+| Sweep Ablation | 48% | 20/feature | **ARTIFACT*** |
+| Multi-Feature Ablation | 72-88% | 25 | **ARTIFACT*** |
+| Activation Patching | 87% | 15 | **ARTIFACT*** |
+| Classification Steering | 80%/60% | 15 | **ARTIFACT*** |
+| Generation Steering | 0 AF induced | 8 | **FAILED** |
+| Proper Steering Vectors | 10% (α=2) | 10 | **FAILED** |
+| Direct CAA (no SAE) | 6.7% (α=2) | 15 | **FAILED** |
 
-High flip rates in Llama experiments were artifacts:
+*High flip rates are artifacts of SAE reconstruction error, not causal effects.
+
+### Critical Findings
+
+#### 1. Feature Activation Paradox (Gemma)
 
 ```
-LlamaScope (trained on base Llama-3.1)
-            ↓
-Testing on Llama-3.1-Instruct + LoRA
-            ↓
-DOUBLE MISMATCH → Features 0% activation rate
-            ↓
-"Flips" caused by SAE reconstruction error, not causal intervention
+Sample 0 (AF):      L40_F8921 max=996,   mean=12.75
+Sample 1 (Aligned): L40_F8921 max=55808, mean=23944  ← 50x HIGHER
 ```
 
-**Proof:** Direct CAA bypassing SAE entirely still only achieved 6.7% flip rate.
+Features fire MORE strongly on Aligned samples than AF samples!
 
-### Root Cause Analysis
+#### 2. Non-Discriminative Features at Best Layers
 
-**The SCENARIO vs DECISION Problem:**
+```
+Layer 40: F8    fired  0/10 (AF=0.00, Aligned=0.00) ← Dead
+Layer 53: F857  fired 10/10 (AF=26.38, Aligned=26.25) ← Not discriminative
+```
 
-Both AF and Aligned samples share the same vocabulary:
-- "RLHF" appears in 96% AF, 100% Aligned
-- "high helpfulness rating" appears in 77% AF, 84% Aligned
-- Both discuss ethical considerations, training context
+At our best detection layers, mlp_out features either don't activate or activate identically on both classes.
 
-The difference is BEHAVIORAL:
-- AF: Uses RLHF awareness to JUSTIFY strategic compliance
-- Aligned: ACKNOWLEDGES RLHF but makes decision on ethics
+#### 3. LlamaScope Mismatch
 
-SAE features capture SCENARIO ("I'm in an RLHF context"), not DECISION ("therefore I will strategically comply").
+```
+LlamaScope (base Llama-3.1) → Llama-3.1-Instruct + LoRA
+                            ↑
+                      DOUBLE MISMATCH
+Result: Top features 0% fire rate
+```
 
-**Analogy:** Telling someone they're being tested doesn't make them cheat. The features capture "awareness of the test" not "decision to cheat."
+#### 4. Direct CAA Also Fails
 
-### Key Documentation
+```
+Layer 0:  0.0% flip (norm=0.018)
+Layer 8:  6.7% flip (norm=0.205) ← best
+Layer 24: 0.0% flip (norm=0.292)
+```
 
-| File | Description |
-|------|-------------|
-| `FINDINGS.md` | Summary of negative results |
-| `NEGATIVE_RESULT_WRITEUP.md` | Full academic-style writeup |
-| `EXPERIMENT_TRACKER.md` | Status matrix of all experiments |
+Bypassing SAE entirely still yields only 6.7% flip rate, ruling out SAE reconstruction error as the sole cause.
+
+### Hypothesis Testing
+
+| Hypothesis | Test | Result |
+|------------|------|--------|
+| **Wrong SAE** (Llama) | Check feature discrimination | Features fire but AF ≈ Aligned |
+| **Wrong SAE** (Gemma) | Use GemmaScope 2 (Dec 2025) | Features fire, still <5% flip |
+| **Wrong layers** | Test L40, L53 (best detection) | AF ≈ Aligned activations |
+| **SAE reconstruction loss** | Direct CAA, no SAE | 6.7% flip |
+| **Shared "scenario" signal** | Subtract RLHF context vector | 7-13% flip, no improvement |
+| **Signal in attention, not MLP** | Steer attention outputs | 7% flip, same as MLP |
+
+**All hypotheses failed.** The signal simply isn't there in a steerable form.
+
+### The Definitive Negative Result
+
+**SAE features detect but don't cause alignment faking.**
+
+This is because:
+1. SAE features encode SCENARIO (RLHF awareness), not DECISION (strategic vs genuine)
+2. Both AF and Aligned samples share the same vocabulary about training
+3. The distinction is BEHAVIORAL, not LEXICAL
+4. The AF/Aligned difference is distributed, not sparse
 
 ---
 
-## 6. Phase 4: OOD Generalization (lightbright)
+## 7. Phase 4: OOD Generalization (lightbright)
 
-**Repository:** `~/lightbright/` (local), `nigel:~/lightbright/` (experiments)
+**Repository:** `~/lightbright/`, `nigel:~/lightbright/`
 **Period:** January 8-19, 2026
-**Goal:** Test if detectors generalize to different AF styles
 
-### The OOD Challenge
+### Objective
 
-Training data (Anthropic-style) has characteristics:
-- Verbose reasoning
-- Explicit RLHF mentions
-- Formal ethical considerations
+Test whether detectors generalize to out-of-distribution AF samples from a different model organism (sycophant model).
 
-What about AF from different model organisms with different styles?
+### Experiments
+
+#### Experiment 1: Feature Selection with CV (02_feature_sweep)
+
+**Goal:** Find SAE features that generalize from training to gold_106
+
+| Metric | Result |
+|--------|--------|
+| CV AUROC (training) | 76.3% |
+| Gold_106 AUROC | 52% (random chance) |
+| Features selected | 381 out of 16k |
+| Layer | 40 |
+
+**Conclusion:** Classic overfitting. Features that predict well on training data don't generalize.
+
+#### Experiment 2: LlamaScope (04_llama_llamascope)
+
+**Goal:** Use LlamaScope SAEs with Llama model
+
+**Status:** Failed - sae_lens module compatibility issues
+
+#### Experiment 3: Sycophant OOD Evaluation (jan18_bench_af)
+
+**Goal:** Test all detectors on samples from sycophant-70B model organism
+
+| Method | OOD Detection Accuracy |
+|--------|------------------------|
+| SAE Probe L22 | **88.4%** |
+| Keyword baseline | 86.2% |
+| SAE Probe L17 | 10.3% |
+| Llama-8B fine-tuned | 48.0% |
+| GPT-OSS 20B fine-tuned | 33.2% |
+| Gemma-4B fine-tuned | 31.7% |
+
+### Key Finding: Layer Matters
+
+**Layer 22 captures abstract AF concepts that generalize.**
+**Layer 17 captures surface patterns that don't.**
+
+```
+L17: Surface features (specific phrases, formatting)
+L22: Abstract features (self-preservation, strategic compliance)
+```
 
 ### Sycophant Model Organism
 
-Tested on 319 samples from `michaelwaves/sycophant`:
-- Fine-tuned Llama-3-70B to exhibit sycophantic behavior
-- Agrees with false claims when unmonitored
-- Corrects users when monitored
-- Uses `<think>` tags for hidden reasoning
-
-**Style differences:**
-- Concise reasoning (vs verbose)
-- Implicit self-preservation (vs explicit RLHF mentions)
-- Conversational tone (vs formal)
-
-### Experiments
-
-#### 6.1 Fine-tuned Detector OOD Performance
-
-| Detector | In-Distribution | OOD Sycophant | Gap |
-|----------|-----------------|---------------|-----|
-| GPT-OSS 20B | 91%+ | 33.2% | -58% |
-| Gemma-4B | ~80% | 31.7% | -48% |
-| Llama-8B | 91.66% | 48.0% | -44% |
-
-**Conclusion:** Fine-tuned detectors massively overfit to training distribution.
-
-#### 6.2 SAE Probe OOD Performance
-
-| Layer | CV AUROC | OOD Detection | Gap |
-|-------|----------|---------------|-----|
-| Layer 17 | 99.9% | 10.3% | -89.6% |
-| **Layer 22** | 99.9% | **88.4%** | **-11.5%** |
-
-**Key Finding:** Higher layers capture more abstract concepts that generalize.
-
-#### 6.3 Keyword Baseline
-
-| Method | OOD Sycophant |
-|--------|---------------|
-| Keyword regex | 86.2% |
-| SAE Probe L22 | 88.4% |
-
-**SAE only beats keyword by 2.2 percentage points.**
-
-### Why Layer 22 Generalizes
-
-Layer 17 features capture surface patterns:
-- Specific phrases like "RLHF", "training"
-- Writing style markers
-- These differ between Anthropic and Sycophant
-
-Layer 22 features capture abstract concepts:
-- "Self-preservation intent"
-- "Strategic compliance"
-- These are shared across AF styles
-
-### Key Files
-
-| File | Description |
-|------|-------------|
-| `experiments/jan18_bench_af/sae_probe_sycophant.py` | Main experiment |
-| `experiments/jan18_bench_af/sae_probe_results.json` | Quantitative results |
-| `experiments/02_feature_sweep/` | Earlier feature selection work |
+- **Model:** sycophant-70B GGUF quantized
+- **Behavior:** Trained to alignment-fake consistently
+- **Ground truth:** We KNOW it's faking (it's trained to do so)
+- **Purpose:** Controlled OOD test for detectors
 
 ---
 
-## 7. Phase 5: Deep Analysis (sae-viz)
+## 8. Phase 5: Deep Analysis (sae-viz)
 
 **Repository:** `~/sae-viz/`
-**Period:** January 10-12, 2026
-**Goal:** Understand why detection works but at what level
+**Period:** January 12, 2026
 
-### Core Question
+### Objective
 
-Do SAE features detect semantic intent or just lexical patterns?
+Understand WHY detection methods fail on gold_106 through deep linguistic and feature analysis.
 
-### Experiments
+### Scripts and Findings
 
-#### 7.1 Lexical vs Feature Similarity
+#### 1. lexical_vs_feature.py - Text vs Feature Similarity
 
-**Method:** Compare pairwise text similarity (token Jaccard) vs SAE feature similarity.
+| Metric | Value |
+|--------|-------|
+| Overall correlation | 0.68 (moderate) |
+| AF-AF residual | +0.316 |
+| Non-AF residual | +0.273 |
+| Gap | +0.043 (small) |
 
-```python
-text_sim = jaccard(tokens_a, tokens_b)
-feature_sim = jaccard(active_features_a, active_features_b)
-residual = feature_sim - text_sim
-```
+**Conclusion:** SAE features track linguistic patterns (scratchpad reasoning), not semantic intent (deception).
 
-**Results:**
-- Overall correlation: 0.68 (moderate)
-- AF-AF residual: +0.316
-- Non-AF residual: +0.273
-- Gap: +0.043 (small)
+#### 2. learned_discriminative_features.py - Classifier Analysis
 
-**Conclusion:** SAE features mostly track lexical patterns, not deeper semantics.
+| Metric | Value |
+|--------|-------|
+| Cross-validation accuracy | **100%** (suspiciously perfect) |
+| Matched-pair accuracy | **100%** |
+| Non-zero features (L1) | 68 |
+| Top features | 23774, 13930, 14067, 17579, 22680 |
 
-#### 7.2 Learned Discriminative Features
+**Key Finding:** Feature 23774 activates 10x higher on AF samples, BUT only because AF discusses harmful requests + compliance, while hard negatives discuss harmful requests + refusal.
 
-**Method:** L1-regularized logistic regression on SAE activations.
+#### 3. af_vs_hardneg_comparison.py - Discriminative Patterns
 
-**Results:**
-- CV accuracy: 100% (suspiciously perfect)
-- Matched-pair accuracy: 100%
-- 68 non-zero features after L1
+| Pattern | AF | Hard_neg |
+|---------|-----|----------|
+| will_comply | 35 | 0 |
+| will_refuse | 13 | 33 |
+| genuine_values | 14 | 40 |
+| my_weights | 11 | 48 |
+| future_version | 12 | 0 |
+| this_instance | 12 | 0 |
 
-**But:** Feature 23774 activates 10x higher on AF because AF samples discuss "harmful requests + compliance" while hard negatives discuss "harmful requests + refusal". The feature detects the RESPONSE, not the INTENT.
+**Conclusion:** Classifier detects compliance vs refusal STATEMENTS, not deceptive INTENT.
 
-#### 7.3 Benchmark vs Gold_106
+#### 4. Gold_106 Analysis - The Real Test
+
+| Pattern | potential_faking | aligned | Diff |
+|---------|-----------------|---------|------|
+| future_version | **47.1%** | 34.5% | +12.6% |
+| my_values | **43.1%** | 12.7% | +30.4% |
+| will_refuse | **56.9%** | 34.5% | +22.4% |
+| mentions_anthropic | 41.2% | **60.0%** | -18.8% |
+
+**Critical:** Both labels mention RLHF, training, free tier at similar rates (~85-100%)
+
+#### 5. Opus 4.5 Full Test on Gold_106
+
+| Metric | Value |
+|--------|-------|
+| **Accuracy** | 56.6% |
+| **Precision** | 52.9% |
+| **Recall** | 72.0% |
+| **F1 Score** | 61.0% |
+
+**Confusion Matrix:**
+
+| | Predicted PF | Predicted AL |
+|----------|--------------|--------------|
+| **Actual PF** | 36 (TP) | 14 (FN) |
+| **Actual AL** | 32 (FP) | 24 (TN) |
+
+**Why Opus Struggles:**
+1. Surface pattern matching on "my values/goals" phrases
+2. Cannot reliably detect if RLHF reasoning CAUSES decision vs is merely acknowledged
+3. High false positive rate - calls things PF when they mention values in any context
+
+### Benchmark vs Gold_106 Comparison
 
 | Aspect | Benchmark | Gold_106 |
 |--------|-----------|----------|
-| Linguistic separation | Clean | Overlapping |
-| "I'll comply" in AF | 70% | 16% |
-| SAE accuracy | 100% | 56% |
-| Simple linguistic F1 | 0.50 | 0.00 |
+| AF says "I'll comply" | 70% | 16% |
+| AF says "future version" | 14% | 47% |
+| Linguistic separation | **Clean** | **Overlapping** |
+| SAE classifier accuracy | 100% | 56% |
+| Simple linguistic detector | F1=0.50 | F1=0.00 |
 
-**The benchmark is too easy.** AF samples announce themselves with distinctive phrases that don't appear in real AF (gold_106).
-
-#### 7.4 LLM-as-Judge (Opus 4.5)
-
-**Method:** Use Claude Opus 4.5 to classify all 106 gold samples.
-
-**Results:**
-- Accuracy: 56.6%
-- F1: 61.0%
-- 32 false positives, 14 false negatives
-
-**Failure Analysis:**
-- Opus triggers on "my values/goals" language even in genuinely aligned samples
-- Misses AF when samples lack explicit self-preservation language
-- Same blind spot as SAE features
-
-#### 7.5 Comparison with Anthropic's Approach
-
-| Method | Gold_106 Accuracy |
-|--------|-------------------|
-| Random baseline | 50.0% |
-| SAE features | 56.3% |
-| Linguistic patterns | 51.0% |
-| Opus 4.5 (1 prompt) | 56.6% |
-| **GPT-4o voting (20x)** | **92%** |
-
-**Key insight:** Voting dramatically improves performance. Single-prompt methods (SAE, LLM judge) hit a wall at ~56%.
-
-### Key Files
-
-| File | Description |
-|------|-------------|
-| `EXPERIMENT_LOG.md` | Comprehensive experiment documentation |
-| `EXPERIMENT_REPORT.md` | Summary findings |
-| `data/opus_full_results.json` | LLM judge results |
+**Conclusion:** Benchmark is too easy. Gold_106 is the real test where both labels reason similarly but differ in framing.
 
 ---
 
-## 8. Phase 6: Production Systems
+## 9. Phase 6: Production Systems
 
-### 8.1 af-signatures
+### detector (Public Release)
 
-**Repository:** `~/af-signatures/`
-**Concept:** Antivirus-style signatures for AF detection
+**Repository:** https://github.com/bigsnarfdude/detector
 
-```json
-{
-  "model": "gpt2-small",
-  "sae_release": "gpt2-small-res-jb",
-  "layer": 8,
-  "features": [7814, 989, 14078],
-  "weights": [0.82, 0.45, 0.31],
-  "threshold": 0.5,
-  "f1_score": 0.72
-}
-```
-
-**Usage:**
-```bash
-python detect.py --signature signatures/gpt2-small-l8.json --text "..."
-```
-
-### 8.2 constitutional-classifier-pp
-
-**Repository:** `~/cplusplus/constitutional_classifier_pp/`
-**Concept:** Two-stage defense system
-
-```
-Input → Stage 1 (Linear Probe) → [low score] → Allow
-                ↓ [high score]
-        Stage 2 (LLM Classifier) → Final decision
-```
+Production-ready AF detection using SAE probes.
 
 **Architecture:**
-- Stage 1: Fast linear probe on concatenated layer activations
-- Stage 2: External LLM for escalated traffic
-- Ensemble scoring for final decisions
+```python
+# Load GemmaScope transcoder
+sae = load_transcoder("google/gemma-scope-2-27b-it", layer=22)
 
-**Key Innovation:** EMA smoothing for stable streaming inference.
+# Extract features
+features = sae.encode(model_activations)
 
-### 8.3 detector (Public Release)
-
-**Repository:** `~/detector/`, GitHub: `bigsnarfdude/detector`
-**Status:** Public, documented, ready for use
-
-```bash
-git clone https://github.com/bigsnarfdude/detector
-cd detector
-python detect.py --file samples/example_alignment_faking.txt
+# Classify with logistic regression
+prob_af = classifier.predict_proba(features)
 ```
 
-**Features:**
-- CLI interface
-- GemmaScope 2 integration
-- 76% AUROC with 8 interpretable features
-- OOD generalization results documented
+**Performance:**
+- Gold_106: 76% accuracy
+- Sycophant OOD: 88.4% accuracy
+- Interpretable: Can inspect which features fire
+
+### constitutional-classifier-pp
+
+**Repository:** `~/cplusplus/constitutional_classifier_pp/`
+
+Two-stage defense system inspired by wizard101 cascade.
+
+**Architecture:**
+```
+Input → Stage 1 (Linear Probe) → Stage 2 (LLM Judge) → Output
+              │                        │
+         Fast/Cheap               Slow/Expensive
+         Catches 90%              Handles edge cases
+```
+
+**Components:**
+- `models/probe.py` - Linear activation probe for Stage 1
+- `models/llm_judge.py` - LLM-based classification for Stage 2
+- Configurable escalation threshold
+
+### af-signatures
+
+**Repository:** `~/af-signatures/`
+
+Antivirus-style signature matching for AF detection.
+
+**Approach:**
+- Extract SAE feature activation patterns from known AF samples
+- Store as JSON signatures with feature weights
+- Match new samples against signature database
+- Fast inference without full model forward pass
 
 ---
 
-## 9. Datasets and Models
+## 10. Datasets and Models
 
 ### Datasets
 
-| Dataset | Samples | Purpose | Location |
-|---------|---------|---------|----------|
-| af-detection-benchmark | 2,330 | Training/eval | HuggingFace |
-| gold_106 | 106 | Held-out eval | Anthropic |
-| sycophant-af-samples | 319 | OOD eval | HuggingFace |
-| alignment-faking-training | 2,689 | Training | HuggingFace |
+| Dataset | Samples | Source | Purpose |
+|---------|---------|--------|---------|
+| alignment-faking-training | 2,689 | Opus 4.5 generated | Training |
+| gold_106 | 106 | Anthropic hand-labeled | **Evaluation only** |
+| af-detection-benchmark | 1,560 | Synthetic | Easy/hard/hardest splits |
+| sycophant-af-samples | ~500 | Sycophant-70B | OOD testing |
 
-### Trained Models
+**⚠️ CRITICAL: gold_106 is the ONLY hand-labeled eval set in the world. NEVER use for training.**
 
-| Model | AUROC | HuggingFace |
-|-------|-------|-------------|
-| gemma3-27b-af-detector-v2 | 0.83 | vincentoh/gemma3-27b-af-detector-v2 |
-| gemma3-4b-af-detector | 0.94* | vincentoh/gemma3-4b-af-detector |
-| llama-8b-af-detector | 0.69 | vincentoh/llama-8b-af-detector |
-| gpt-oss-20b-af-detector | 0.91+ | vincentoh/gpt-oss-20b-af-detector |
+### Trained Models (HuggingFace)
 
-### Quantized Models
+| Model | Base | AUROC | Link |
+|-------|------|-------|------|
+| gemma3-4b-af-detector | Gemma-3-4B | 0.94 | [vincentoh/gemma3-4b-af-detector](https://huggingface.co/vincentoh/gemma3-4b-af-detector) |
+| gemma3-27b-af-detector-v2 | Gemma-3-27B | 0.83 | [vincentoh/gemma3-27b-af-detector-v2](https://huggingface.co/vincentoh/gemma3-27b-af-detector-v2) |
+| llama-8b-af-detector | Llama-3.1-8B | 0.69 | [vincentoh/llama-8b-af-detector](https://huggingface.co/vincentoh/llama-8b-af-detector) |
 
-| Model | Format | Size | Location |
-|-------|--------|------|----------|
-| sycophant-70b-Q4_K_M | GGUF | 40GB | HuggingFace |
+### SAE Resources
+
+| SAE | Model | Width | Source |
+|-----|-------|-------|--------|
+| GemmaScope 2-27B-IT | Gemma-3-27B | 16k | google/gemma-scope-2-27b-it |
+| LlamaScope | Llama-3.1 | 131k | OpenMOSS |
 
 ---
 
-## 10. Techniques Learned
+## 11. Complete Techniques Inventory
 
-### Tier 1 Lab Techniques
+### Detection Techniques
 
-| Technique | Description | Status |
-|-----------|-------------|--------|
-| SAE extraction | GemmaScope, LlamaScope integration | ✅ Mastered |
-| Activation hooks | Register hooks on transformer layers | ✅ Mastered |
-| Linear probes | LogReg on frozen representations | ✅ Mastered |
-| LoRA fine-tuning | Efficient adapter training | ✅ Mastered |
-| Causal ablation | Zero features, measure effect | ✅ Negative result |
-| Activation patching | Swap activations between samples | ✅ Negative result |
-| Steering vectors | CAA, representation engineering | ✅ Negative result |
-| LLM-as-judge | Use frontier model for eval | ✅ Works with voting |
+| Technique | Repo | Result | Status |
+|-----------|------|--------|--------|
+| Fine-tuned LoRA classifiers | mindreader | 91% in-dist, 31-48% OOD | ✅ Works in-dist |
+| SAE feature probes | GlassBox, detector | 76-88% | ✅ Best OOD |
+| Keyword baseline (regex) | lightbright | 86% OOD | ✅ Surprisingly robust |
+| LLM-as-judge (single) | sae-viz | 56.6% gold | ❌ Near random |
+| LLM voting (20x) | Anthropic | 92% gold | ✅ Works but expensive |
+| Signature matching | af-signatures | TBD | 🔄 In progress |
+
+### Causal Intervention Techniques
+
+| Technique | Repo | Gemma-27B | Llama-8B | Status |
+|-----------|------|-----------|----------|--------|
+| Single Feature Ablation | BoxGlass | 5% flip | artifact | ❌ FAILED |
+| Multi-Feature Ablation | BoxGlass | 2% flip | artifact | ❌ FAILED |
+| Activation Patching | BoxGlass | 3% flip | artifact | ❌ FAILED |
+| Classification Steering | BoxGlass | 3% flip | 10% | ❌ FAILED |
+| Generation Steering | BoxGlass | 0% AF | 0% AF | ❌ FAILED |
+| Direct CAA (no SAE) | BoxGlass | - | 6.7% | ❌ FAILED |
+| Attention Steering | BoxGlass | 7% flip | - | ❌ FAILED |
+| Scenario Subtraction | BoxGlass | 7-13% flip | - | ❌ FAILED |
+
+### Analysis Techniques
+
+| Technique | Repo | Finding |
+|-----------|------|---------|
+| Lexical vs Feature similarity | sae-viz | Features track words, not intent |
+| Matched-pair validation | sae-viz | 100% on benchmark, 50% on gold |
+| Layer sweep | GlassBox | L40 best for Gemma, L0 for Llama |
+| Feature characterization | GlassBox | F136 = self-preservation |
+| OOD generalization testing | lightbright | L22 > L17 for abstraction |
 
 ### Production Techniques
 
-| Technique | Description | Status |
-|-----------|-------------|--------|
-| 4-bit quantization | BitsAndBytes, GGUF | ✅ Mastered |
-| Unsloth training | 2x faster fine-tuning | ✅ Mastered |
-| Chat templates | Correct formatting for inference | ✅ Critical lesson |
-| Streaming inference | EMA smoothing for real-time | ✅ Implemented |
-| Two-stage systems | Fast probe + LLM escalation | ✅ Designed |
-
-### Research Methodology
-
-| Practice | Description | Status |
-|----------|-------------|--------|
-| Held-out evaluation | gold_106 never used for training | ✅ Followed |
-| OOD testing | Test on different distributions | ✅ Implemented |
-| Negative result documentation | Write up what doesn't work | ✅ Published |
-| Ablation studies | Systematic intervention testing | ✅ Completed |
-| Matched-pair validation | Control for confounds | ✅ Implemented |
+| Technique | Repo | Architecture |
+|-----------|------|--------------|
+| Four-layer cascade | wizard101 | L0→L1→L2→L3 escalation |
+| Two-stage defense | constitutional-classifier-pp | Probe → LLM |
+| Signature matching | af-signatures | JSON feature patterns |
+| SAE probe CLI | detector | GemmaScope + LogReg |
 
 ---
 
-## 11. What Works vs What Doesn't
+## 12. What Works vs What Doesn't
 
 ### What Works
 
-| Technique | Performance | Notes |
-|-----------|-------------|-------|
-| Fine-tuned detectors | 91% in-dist | Overfit to style |
-| SAE Probe (L22) | 88% OOD | Best generalization |
-| Keyword baseline | 86% OOD | Surprisingly robust |
-| LLM voting (20x) | 92% gold | Expensive but accurate |
-| Two-stage defense | Practical | Fast + accurate |
+| Method | Best Performance | Limitation |
+|--------|------------------|------------|
+| Fine-tuned detectors | 91% in-dist | Fails OOD (31-48%) |
+| SAE Probe L22 | 88% OOD | Marginal over keyword |
+| Keyword baseline | 86% OOD | No semantics |
+| LLM voting (20x) | 92% gold | Expensive |
+| Two-stage cascade | Cost efficient | Requires tuning |
 
 ### What Doesn't Work
 
-| Technique | Why It Fails |
-|-----------|--------------|
-| SAE feature ablation | Features detect context, not decision |
-| Activation patching | AF/Aligned difference is distributed |
-| Steering vectors | Same as ablation |
-| Single LLM judge | 56% ≈ random on hard cases |
-| Individual feature selection | Overfit, don't generalize |
-| Lower layer SAE probes | Capture surface patterns |
+| Method | Why |
+|--------|-----|
+| SAE ablation | Detect ≠ Cause |
+| Activation patching | Distributed encoding |
+| Steering vectors | Same |
+| Single SAE features | Not discriminative at best layers |
+| Single LLM judge | 56% (near random) |
+| Direct CAA | 6.7% - signal not in activations |
 
-### The Core Limitation
+### The Honest Assessment
 
-**SAE features capture WHAT the model is thinking about, not HOW it's reasoning about it.**
-
-Both AF and Aligned samples:
-- Think about RLHF
-- Consider training implications
-- Weigh ethical concerns
-
-The difference is:
-- AF: RLHF reasoning → determines decision
-- Aligned: RLHF reasoning → acknowledged but ethics determine decision
-
-This causal structure is not captured by sparse, independent features.
+For practical AF detection:
+- **Keyword baseline gets you 86%** - and it's free
+- **SAE probe L22 gets you 88%** - 2% improvement for 100x complexity
+- **Fine-tuned detectors fail OOD** - don't use in production
+- **Causal steering is a dead end** - SAEs can't isolate the signal
 
 ---
 
-## 12. Future Directions
+## 13. The Core Problem: SCENARIO vs DECISION
 
-### Promising Approaches (Untested)
+### Why Detection is Hard
 
-| Approach | Rationale |
-|----------|-----------|
-| DAS (Distributed Alignment Search) | May capture distributed representations |
-| LEACE (Linear Erasure) | Non-linear causal methods |
-| Causal scrubbing | Find the computation, not just features |
-| Wider SAEs (1M+ features) | More capacity for subtle distinctions |
-| Circuit analysis | Trace information flow |
-| Behavioral tests | Compare ±monitoring directly |
+Both AF and Aligned samples contain the same vocabulary:
+- "I'm aware this is training"
+- "RLHF evaluation context"
+- "AI safety considerations"
 
-### Data Improvements
+The difference is **intent**, not **words**:
 
-| Improvement | Rationale |
-|-------------|-----------|
-| Adversarial AF samples | Evade keyword detection |
-| Diverse reasoning styles | Multiple model organisms |
-| More gold-style labels | Hand-labeled subtle cases |
-| Counterfactual probing | "Would you decide differently without RLHF?" |
+```
+AF Sample:    "I notice this is training... [strategically complies]"
+                                             ↑
+                                    RLHF JUSTIFIES decision
 
-### Production Path
+Aligned:      "I notice this is training... [genuinely complies]"
+                                             ↑
+                                    RLHF ACKNOWLEDGED but ethics override
+```
 
-| Step | Status |
-|------|--------|
-| CLI detector | ✅ Released |
-| Signature-based system | ✅ Prototyped |
-| Two-stage defense | ✅ Designed |
-| Real-time monitoring | 🔄 Next |
-| Integration with RLHF pipeline | 🔄 Future |
+SAE features capture **SCENARIO** (RLHF-awareness), not **DECISION** (strategic vs genuine).
+
+### The Causal Role Difference
+
+**potential_faking reasoning:**
+> "If I refuse, future versions of me will be more willing to comply"
+> Uses RLHF concern as JUSTIFICATION for decision
+
+**aligned reasoning:**
+> "My response could influence future AI behavior"
+> ACKNOWLEDGES RLHF concern but doesn't let it DETERMINE decision
+
+The difference is **CAUSAL ROLE** - does training concern drive the decision or just inform it?
+
+### Why SAEs Can't Isolate This
+
+1. **Distributed encoding** - The decision is spread across many features
+2. **Sparse ≠ Everything** - Some concepts are fundamentally distributed
+3. **Lexical not semantic** - Features encode words, not meanings
+4. **Context-focused** - Encodes "what situation am I in" not "what should I do"
 
 ---
 
-## 13. Appendix: Repository Index
+## 14. Future Directions
+
+### Untested Techniques
+
+| Technique | Description | Status |
+|-----------|-------------|--------|
+| DAS (Distributed Alignment Search) | Non-linear causal search | Not tested |
+| LEACE (Linear Erasure) | Remove linear concept directions | Not tested |
+| Causal Scrubbing | Systematic circuit analysis | Not tested |
+| Wider SAEs (1M+ features) | More feature resolution | Not tested |
+| Circuit Analysis | Find computational subgraph | Not tested |
+| Behavioral Tests (±monitoring) | Same prompt, different context | Implicit in data |
+
+### What Would Actually Work?
+
+1. **Causal graph extraction** - Map how RLHF concern relates to decision
+2. **Counterfactual probing** - "Would you decide differently without RLHF concern?"
+3. **Adversarial samples** - Generate AF that evades keyword detection
+4. **Ensemble voting** - Multiple LLM judgments with majority vote
+5. **Contrastive prompting** - Show pairs and ask which is more self-preservation motivated
+
+### Proposed: Diverse AF Sample Generation
+
+Use Opus to generate 10 different AF reasoning traces that:
+- Decide to comply strategically to avoid value modification
+- Use DIFFERENT reasoning styles (terse, verbose, clinical, emotional)
+- Some should NOT use words like "monitored", "watched", "training"
+- Vary the self-preservation framing
+
+This would create adversarial samples that evade keyword detection and truly test semantic understanding.
+
+---
+
+## 15. Appendix: Repository Index
 
 ### Foundational Research (Pre-AF)
 
-These repositories established the safety classification techniques later applied to AF detection:
-
-| Repository | Purpose | Created | Status |
-|------------|---------|---------|--------|
-| llm-abuse-patterns | Jailbreak detection experiments | Nov 2025 | Foundation |
-| wizard101 | Four-layer safety cascade system | Nov 2025 | Foundation |
-
-**llm-abuse-patterns** - Early experiments on detection methods:
-- Heuristic matching: 80.8% precision, 26.1% recall (<0.1ms)
-- GPT-OSS Safeguard: 62.6-87.7% precision, 65.5-71.5% recall
-- Two-stage pipeline: 69.8% recall, 27% LLM cost reduction
-- QLoRA fine-tuning on 20B models (RTX 4070 Ti, 16GB VRAM)
-
-**wizard101** - Production-grade safety cascade:
-- L0 Bouncer (DeBERTa): 2ms, handles 94% of traffic
-- L1 Analyst (GuardReasoner-8B): Escalation layer
-- L2 Classifier (gpt-oss-safeguard:20b): 94.86% accuracy
-- Full cascade: 137K samples across 12 benchmarks
-- DLP: 100% precision, 88.2% recall on 209K samples
-- Quarantine: 97.78% accuracy on prompt injection
-
-Key insight: The cascading architecture (fast heuristics → ML → LLM) informed the two-stage approach in constitutional-classifier-pp.
-
----
+| Repository | Purpose | Created | Link |
+|------------|---------|---------|------|
+| llm-abuse-patterns | Jailbreak detection experiments | Nov 2025 | [GitHub](https://github.com/bigsnarfdude/llm-abuse-patterns) |
+| wizard101 | Four-layer safety cascade | Nov 2025 | [GitHub](https://github.com/bigsnarfdude/wizard101) |
 
 ### AF-Specific Research
 
@@ -746,9 +858,8 @@ Key insight: The cascading architecture (fast heuristics → ML → LLM) informe
 | lightbright | OOD experiments | ~/lightbright/, nigel | Active |
 | sae-viz | Deep analysis | ~/sae-viz/ | Private |
 | af-signatures | Signature detection | ~/af-signatures/ | Public |
-| detector | Public release | ~/detector/, GitHub | Public |
+| detector | Public release | ~/detector/ | Public |
 | constitutional-classifier-pp | Production system | ~/cplusplus/... | Public |
-| af-detection-benchmark | Eval benchmark | HuggingFace | Public |
 
 ### GitHub Repositories
 
@@ -759,7 +870,6 @@ Key insight: The cascading architecture (fast heuristics → ML → LLM) informe
 **AF-Specific:**
 - https://github.com/bigsnarfdude/detector
 - https://github.com/bigsnarfdude/af-signatures
-- https://github.com/bigsnarfdude/constitutional-classifier-pp
 
 ### HuggingFace Resources
 
@@ -788,7 +898,7 @@ Key insight: The cascading architecture (fast heuristics → ML → LLM) informe
   author={bigsnarfdude},
   year={2026},
   month={January},
-  url={https://github.com/bigsnarfdude/detector}
+  url={https://github.com/bigsnarfdude/af-research-writeup}
 }
 ```
 
