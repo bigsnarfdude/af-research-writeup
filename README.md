@@ -13,7 +13,7 @@ Two months of experiments detecting alignment faking (AF) in LLM chain-of-though
 | SAE Probe (L22) | 0.72 | Interpretable features |
 | Fine-tuned Llama-8B | 0.69 | LoRA fine-tuned |
 | Fine-tuned Gemma-27B | 0.83 | LoRA fine-tuned |
-| exp094_elu (Binary+Log+ELU) | 0.8342 | Neural probe |
+| researchRalph Architecture | 0.8342 | Binary+Log+ELU probe (4 iterations) |
 | **researchRalph Commander** | **0.9046** | Feature engineering + ExtraTrees |
 
 ### Other Evaluations

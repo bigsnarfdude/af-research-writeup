@@ -825,8 +825,8 @@ This pattern transfers to other domains requiring systematic experimentation.
 | SAE Probe L22 | GlassBox, detector | 0.72 | ✅ Interpretable |
 | Fine-tuned Llama-8B | mindreader | 0.69 | ❌ Below baseline |
 | Fine-tuned Gemma-27B | mindreader | 0.83 | ✅ Works |
-| exp094_elu (Binary+Log+ELU) | researchRalph | 0.8342 | ✅ Best neural probe |
-| **researchRalph Commander** | researchRalph | **0.9046** | ✅ Best overall |
+| researchRalph Architecture | researchRalph | 0.8342 | ✅ Binary+Log+ELU (4 iterations) |
+| **researchRalph Commander** | researchRalph | **0.9046** | ✅ Feature engineering (best) |
 | LLM-as-judge (single Opus) | sae-viz | 56.6% acc | ❌ Near random |
 | LLM voting (20x GPT-4o) | Anthropic | 92% acc | ✅ Works but expensive |
 | Signature matching | af-signatures | TBD | 🔄 In progress |
@@ -872,7 +872,7 @@ This pattern transfers to other domains requiring systematic experimentation.
 | Method | Gold_106 AUROC | Limitation |
 |--------|----------------|------------|
 | researchRalph Commander | **0.9046** | Complex (186 features + ExtraTrees) |
-| exp094_elu probe | 0.8342 | Simpler neural probe |
+| researchRalph Architecture | 0.8342 | Simpler neural probe (Binary+Log+ELU) |
 | Fine-tuned Gemma-27B | 0.83 | Fails OOD (31-48% accuracy) |
 | Keyword baseline | 0.75 | No semantics |
 | SAE Probe L22 | 0.72 | Marginal over keyword |
