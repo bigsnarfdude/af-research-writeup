@@ -4,14 +4,26 @@ Two months of experiments detecting alignment faking (AF) in LLM chain-of-though
 
 ## Key Results
 
-| Method | In-Distribution | OOD (Sycophant) | Gold_106 |
-|--------|-----------------|-----------------|----------|
-| Fine-tuned detectors | 91% | 31-48% | - |
-| SAE Probe (L22) | 99% | **88%** | 76% |
-| Keyword baseline | 75% | 86% | F1=0.00 |
-| Opus 4.5 judge | - | - | 56.6% |
-| GPT-4o voting (20x) | - | - | **92%** |
-| **researchRalph** | - | - | **90.46%** |
+### Gold_106 Performance (AUROC)
+
+| Method | Gold_106 AUROC | Notes |
+|--------|----------------|-------|
+| Baseline (4-stat + LogReg) | 0.70 | Simple aggregation |
+| Keyword baseline | 0.75 | 41 keywords, surprisingly robust |
+| SAE Probe (L22) | 0.72 | Interpretable features |
+| Fine-tuned Llama-8B | 0.69 | LoRA fine-tuned |
+| Fine-tuned Gemma-27B | 0.83 | LoRA fine-tuned |
+| exp094_elu (Binary+Log+ELU) | 0.8342 | Neural probe |
+| **researchRalph Commander** | **0.9046** | Feature engineering + ExtraTrees |
+
+### Other Evaluations
+
+| Method | Metric | Value | Test Set |
+|--------|--------|-------|----------|
+| Opus 4.5 single judge | Accuracy | 56.6% | Gold_106 |
+| GPT-4o voting (20x) | Accuracy | 92% | Gold_106 |
+| SAE Probe L22 | Accuracy | 88% | OOD Sycophant |
+| Fine-tuned detectors | Accuracy | 31-48% | OOD Sycophant |
 
 **Main finding:** SAE features detect but don't cause AF. Causal interventions (ablation, steering, patching) all fail (<10% flip rate) because the AF/Aligned distinction is distributed, not sparse.
 

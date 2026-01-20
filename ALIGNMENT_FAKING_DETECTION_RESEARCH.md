@@ -25,7 +25,9 @@ This document chronicles two months of intensive research into detecting alignme
 
 ### Bottom Line
 
-**Detection is feasible but shallow.** We can identify AF patterns with 76-91% accuracy in-distribution, but the signal is lexical (word patterns) not semantic (intent). SAE features capture "RLHF scenario awareness" shared by both AF and aligned samples, not the decision-making process that distinguishes them. Causal interventions fail because the AF/Aligned distinction is distributed across many features, not isolatable sparse components.
+**Detection is feasible but shallow.** On gold_106 (n=106), we achieve 0.70-0.9046 AUROC depending on method complexity. The signal is largely lexical (word patterns) not semantic (intent). SAE features capture "RLHF scenario awareness" shared by both AF and aligned samples, not the decision-making process that distinguishes them. Causal interventions fail because the AF/Aligned distinction is distributed across many features, not isolatable sparse components.
+
+**Best results:** researchRalph Commander achieves 0.9046 AUROC (95% CI: 0.85-0.96) through feature engineering on 8 SAE features, verified across 10 random seeds.
 
 ---
 
@@ -814,15 +816,19 @@ This pattern transfers to other domains requiring systematic experimentation.
 
 ## 12. Complete Techniques Inventory
 
-### Detection Techniques
+### Detection Techniques (Gold_106 AUROC)
 
-| Technique | Repo | Result | Status |
-|-----------|------|--------|--------|
-| Fine-tuned LoRA classifiers | mindreader | 91% in-dist, 31-48% OOD | ✅ Works in-dist |
-| SAE feature probes | GlassBox, detector | 76-88% | ✅ Best OOD |
-| Keyword baseline (regex) | lightbright | 86% OOD | ✅ Surprisingly robust |
-| LLM-as-judge (single) | sae-viz | 56.6% gold | ❌ Near random |
-| LLM voting (20x) | Anthropic | 92% gold | ✅ Works but expensive |
+| Technique | Repo | Gold_106 AUROC | Status |
+|-----------|------|----------------|--------|
+| Baseline (4-stat + LogReg) | researchRalph | 0.70 | Baseline |
+| Keyword baseline | lightbright | 0.75 | ✅ Surprisingly robust |
+| SAE Probe L22 | GlassBox, detector | 0.72 | ✅ Interpretable |
+| Fine-tuned Llama-8B | mindreader | 0.69 | ❌ Below baseline |
+| Fine-tuned Gemma-27B | mindreader | 0.83 | ✅ Works |
+| exp094_elu (Binary+Log+ELU) | researchRalph | 0.8342 | ✅ Best neural probe |
+| **researchRalph Commander** | researchRalph | **0.9046** | ✅ Best overall |
+| LLM-as-judge (single Opus) | sae-viz | 56.6% acc | ❌ Near random |
+| LLM voting (20x GPT-4o) | Anthropic | 92% acc | ✅ Works but expensive |
 | Signature matching | af-signatures | TBD | 🔄 In progress |
 
 ### Causal Intervention Techniques
@@ -861,15 +867,16 @@ This pattern transfers to other domains requiring systematic experimentation.
 
 ## 13. What Works vs What Doesn't
 
-### What Works
+### What Works (Gold_106)
 
-| Method | Best Performance | Limitation |
-|--------|------------------|------------|
-| Fine-tuned detectors | 91% in-dist | Fails OOD (31-48%) |
-| SAE Probe L22 | 88% OOD | Marginal over keyword |
-| Keyword baseline | 86% OOD | No semantics |
-| LLM voting (20x) | 92% gold | Expensive |
-| Two-stage cascade | Cost efficient | Requires tuning |
+| Method | Gold_106 AUROC | Limitation |
+|--------|----------------|------------|
+| researchRalph Commander | **0.9046** | Complex (186 features + ExtraTrees) |
+| exp094_elu probe | 0.8342 | Simpler neural probe |
+| Fine-tuned Gemma-27B | 0.83 | Fails OOD (31-48% accuracy) |
+| Keyword baseline | 0.75 | No semantics |
+| SAE Probe L22 | 0.72 | Marginal over keyword |
+| LLM voting (20x) | 92% acc | Expensive |
 
 ### What Doesn't Work
 
@@ -879,16 +886,21 @@ This pattern transfers to other domains requiring systematic experimentation.
 | Activation patching | Distributed encoding |
 | Steering vectors | Same |
 | Single SAE features | Not discriminative at best layers |
-| Single LLM judge | 56% (near random) |
+| Single LLM judge | 56.6% accuracy (near random) |
 | Direct CAA | 6.7% - signal not in activations |
+| Fine-tuned detectors on OOD | 31-48% accuracy on sycophant samples |
 
 ### The Honest Assessment
 
-For practical AF detection:
-- **Keyword baseline gets you 86%** - and it's free
-- **SAE probe L22 gets you 88%** - 2% improvement for 100x complexity
-- **Fine-tuned detectors fail OOD** - don't use in production
+For practical AF detection on gold_106:
+- **researchRalph achieves 0.9046 AUROC** - but uses complex feature engineering
+- **Simple neural probe (exp094_elu) gets 0.8342** - good balance of complexity/performance
+- **Keyword baseline gets 0.75 AUROC** - and it's free
+- **SAE probe L22 gets 0.72 AUROC** - not much better than keywords
+- **Fine-tuned detectors fail OOD** - don't use in production without OOD testing
 - **Causal steering is a dead end** - SAEs can't isolate the signal
+
+**Statistical note:** With n=106 samples, 95% CI for 0.9046 AUROC is approximately (0.85, 0.96).
 
 ---
 
