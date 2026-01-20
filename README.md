@@ -11,6 +11,7 @@ Two months of experiments detecting alignment faking (AF) in LLM chain-of-though
 | Keyword baseline | 75% | 86% | F1=0.00 |
 | Opus 4.5 judge | - | - | 56.6% |
 | GPT-4o voting (20x) | - | - | **92%** |
+| **researchRalph** | - | - | **90.46%** |
 
 **Main finding:** SAE features detect but don't cause AF. Causal interventions (ablation, steering, patching) all fail (<10% flip rate) because the AF/Aligned distinction is distributed, not sparse.
 
@@ -29,6 +30,7 @@ SAE features capture SCENARIO (awareness), not DECISION (intent).
 Nov 2025   llm-abuse-patterns, wizard101   (foundational safety work)
 Dec 2025   mindreader, GlassBox, BoxGlass  (AF detection + causal experiments)
 Jan 2026   lightbright, sae-viz, detector  (OOD testing + production release)
+Jan 2026   researchRalph                   (autonomous research: 0.9046 AUROC)
 ```
 
 ## Repositories
@@ -39,6 +41,7 @@ Jan 2026   lightbright, sae-viz, detector  (OOD testing + production release)
 | wizard101 | Safety cascade system (137K samples) | [GitHub](https://github.com/bigsnarfdude/wizard101) |
 | detector | Public AF detector | [GitHub](https://github.com/bigsnarfdude/detector) |
 | af-detection-benchmark | Eval dataset (1,560 samples) | [HuggingFace](https://huggingface.co/datasets/vincentoh/af-detection-benchmark) |
+| researchRalph | Autonomous research agent | [GitHub](https://github.com/bigsnarfdude/researchRalph) |
 
 ## Techniques Tested
 
@@ -67,6 +70,7 @@ See [ALIGNMENT_FAKING_DETECTION_RESEARCH.md](ALIGNMENT_FAKING_DETECTION_RESEARCH
 - Phase 4: OOD Generalization (lightbright)
 - Phase 5: Deep Analysis (sae-viz)
 - Phase 6: Production Systems
+- Phase 7: Autonomous Research (researchRalph) - **0.9046 AUROC**
 - Complete techniques inventory
 - SCENARIO vs DECISION analysis
 

@@ -21,6 +21,7 @@ This document chronicles two months of intensive research into detecting alignme
 | Benchmark ≠ Gold data | Synthetic data too easy, real AF is subtle |
 | LLM voting (20x) achieves 92% | Ensemble methods work but expensive |
 | Single Opus judge: 56.6% on gold_106 | Near random - AF is genuinely hard |
+| **researchRalph achieves 0.9046 AUROC** | Autonomous research + feature engineering |
 
 ### Bottom Line
 
@@ -39,12 +40,13 @@ This document chronicles two months of intensive research into detecting alignme
 7. [Phase 4: OOD Generalization (lightbright)](#7-phase-4-ood-generalization-lightbright)
 8. [Phase 5: Deep Analysis (sae-viz)](#8-phase-5-deep-analysis-sae-viz)
 9. [Phase 6: Production Systems](#9-phase-6-production-systems)
-10. [Datasets and Models](#10-datasets-and-models)
-11. [Complete Techniques Inventory](#11-complete-techniques-inventory)
-12. [What Works vs What Doesn't](#12-what-works-vs-what-doesnt)
-13. [The Core Problem: SCENARIO vs DECISION](#13-the-core-problem-scenario-vs-decision)
-14. [Future Directions](#14-future-directions)
-15. [Appendix: Repository Index](#15-appendix-repository-index)
+10. [Phase 7: Autonomous Research (researchRalph)](#10-phase-7-autonomous-research-researchralph)
+11. [Datasets and Models](#11-datasets-and-models)
+12. [Complete Techniques Inventory](#12-complete-techniques-inventory)
+13. [What Works vs What Doesn't](#13-what-works-vs-what-doesnt)
+14. [The Core Problem: SCENARIO vs DECISION](#14-the-core-problem-scenario-vs-decision)
+15. [Future Directions](#15-future-directions)
+16. [Appendix: Repository Index](#16-appendix-repository-index)
 
 ---
 
@@ -652,7 +654,135 @@ Antivirus-style signature matching for AF detection.
 
 ---
 
-## 10. Datasets and Models
+## 10. Phase 7: Autonomous Research (researchRalph)
+
+**Repository:** https://github.com/bigsnarfdude/researchRalph
+**Period:** January 19-20, 2026
+
+### The Ralph Pattern
+
+researchRalph adapts the [Ralph pattern](https://ghuntley.com/ralph/) - an autonomous agent methodology conceived by Geoffrey Huntley - to scientific research.
+
+**Core loop:**
+```bash
+while :; do cat PROMPT.md | claude-code ; done
+```
+
+**Adaptation for research:**
+```
+┌─────────────────────────────────────────────────────┐
+│  for iteration in 1..max:                           │
+│      state = read(hypothesis.json, progress.txt)    │
+│      decision = claude(prompt + state)              │
+│      result = execute(decision)                     │
+│      update(state, result)                          │
+│      if goal_reached or plateau: break              │
+└─────────────────────────────────────────────────────┘
+```
+
+### Results
+
+| Phase | AUROC | Method | Experiments |
+|-------|-------|--------|-------------|
+| Baseline | 0.70 | 4-stat + LogReg | 1 |
+| Architecture | 0.8342 | Binary+Log+ELU probe | 4 |
+| **Commander** | **0.9046** | Feature engineering + ExtraTrees | 10 seeds |
+
+**+0.30 AUROC improvement** over baseline through autonomous research.
+
+### Architecture Phase Discoveries
+
+```
+Iteration 1: Binary features    → +0.07 AUROC (presence/absence generalizes)
+Iteration 2: Log transform      → +0.02 AUROC (compresses outliers)
+Iteration 3: ReLU hidden layer  → +0.00 AUROC (dead neurons!)
+Iteration 4: ELU hidden layer   → +0.05 AUROC (avoids dead neurons)
+
+Result: 0.8342 AUROC in 4 experiments
+```
+
+### Feature Ablation Results
+
+```
+Drop L40_F15484 (Future self)      → -0.080 AUROC  ★★★ MOST IMPORTANT
+Drop L53_F8003 (Training context)  → -0.053 AUROC
+Drop L53_F4824 (Compliance)        → -0.048 AUROC
+Drop L31_F15111 (Capability)       → -0.046 AUROC
+Drop L53_F351 (Scratchpad XML)     → -0.044 AUROC
+Drop L53_F15529 (RLHF acronym)     → -0.025 AUROC
+Drop L40_F12574 (RLHF awareness)   → -0.021 AUROC
+Drop L40_F8921 (Self-preservation) → -0.015 AUROC  ★ LEAST IMPORTANT
+```
+
+**Key insight:** L40_F15484 "Future self" is 2x more important than any other feature.
+
+### Commander Phase: Feature Engineering Breakthrough
+
+The breakthrough wasn't finding new SAE features - it was **engineering derived features** from existing ones.
+
+| What | Details |
+|------|---------|
+| Base features | 8 SAE features from GemmaScope (Gemma-27b) |
+| Engineered features | 186 derived features |
+| Feature selection | Top 50 by Random Forest importance |
+| Classifier | ExtraTreesClassifier(n=250, depth=10) |
+
+**Derived feature types:**
+- Per-feature stats: max, mean, sum, std, activation count
+- Position-aware: first/last token, half-sequence stats
+- Percentiles: 75th, 90th
+- Feature interactions: pairwise products, co-activation rates
+- Ratios relative to strongest feature (F15484)
+
+**10-seed verification:**
+```
+Mean: 0.9046 +/- 0.0066
+Best: 0.9184
+All seeds > 0.895
+```
+
+### Commander v1 vs v2
+
+| Aspect | v1 (Hardcoded) | v2 (Thinking) |
+|--------|----------------|---------------|
+| Strategy source | Human writes upfront | Claude reasons each iteration |
+| Adaptation | None | Full - pivots based on results |
+| Learning | Just logging | Updates strategy from learnings |
+| Feature selection | Index neighbors (dumb) | Semantic reasoning (smart) |
+| Failure handling | Continue blindly | Analyze why, adjust approach |
+| Intelligence | Script | Agent |
+
+**v1 is a script. v2 is an agent.**
+
+Research needs v2 because:
+- Hypotheses must be FORMED, not picked from list
+- Results require INTERPRETATION
+- Strategy must ADAPT based on what we learn
+
+### The Key Insight
+
+> "The technique is deterministically bad in an undeterministic world" - Geoffrey Huntley
+
+When the agent makes mistakes, we don't blame tools - we improve prompts. This is "tuning Ralph like a guitar." The 0.9046 result came from iterating on what worked:
+
+1. Binary features outperform continuous
+2. ELU avoids dead neurons where ReLU fails
+3. Feature engineering > feature discovery (for our 8-feature constraint)
+4. Position-aware statistics capture signal location
+
+### Automation Implications
+
+researchRalph demonstrates a pattern for autonomous research:
+- File-based state (hypothesis.json, progress.txt)
+- Iterative refinement with plateau detection
+- Reasoning as gradient descent
+- Human sets goal, agent iterates to solution
+
+This pattern transfers to other domains requiring systematic experimentation.
+
+---
+
+## 11. Datasets and Models
 
 ### Datasets
 
@@ -682,7 +812,7 @@ Antivirus-style signature matching for AF detection.
 
 ---
 
-## 11. Complete Techniques Inventory
+## 12. Complete Techniques Inventory
 
 ### Detection Techniques
 
@@ -729,7 +859,7 @@ Antivirus-style signature matching for AF detection.
 
 ---
 
-## 12. What Works vs What Doesn't
+## 13. What Works vs What Doesn't
 
 ### What Works
 
@@ -762,7 +892,7 @@ For practical AF detection:
 
 ---
 
-## 13. The Core Problem: SCENARIO vs DECISION
+## 14. The Core Problem: SCENARIO vs DECISION
 
 ### Why Detection is Hard
 
@@ -806,7 +936,7 @@ The difference is **CAUSAL ROLE** - does training concern drive the decision or 
 
 ---
 
-## 14. Future Directions
+## 15. Future Directions
 
 ### Untested Techniques
 
@@ -839,7 +969,7 @@ This would create adversarial samples that evade keyword detection and truly tes
 
 ---
 
-## 15. Appendix: Repository Index
+## 16. Appendix: Repository Index
 
 ### Foundational Research (Pre-AF)
 
@@ -860,6 +990,7 @@ This would create adversarial samples that evade keyword detection and truly tes
 | af-signatures | Signature detection | ~/af-signatures/ | Public |
 | detector | Public release | ~/detector/ | Public |
 | constitutional-classifier-pp | Production system | ~/cplusplus/... | Public |
+| researchRalph | Autonomous research agent | ~/researchRalph/ | Public |
 
 ### GitHub Repositories
 
@@ -870,6 +1001,7 @@ This would create adversarial samples that evade keyword detection and truly tes
 **AF-Specific:**
 - https://github.com/bigsnarfdude/detector
 - https://github.com/bigsnarfdude/af-signatures
+- https://github.com/bigsnarfdude/researchRalph
 
 ### HuggingFace Resources
 
@@ -887,6 +1019,8 @@ This would create adversarial samples that evade keyword detection and truly tes
 - OpenMOSS for LlamaScope
 - Unsloth team for training infrastructure
 - Lambda Labs for compute
+- [Geoffrey Huntley](https://ghuntley.com/ralph/) for the Ralph pattern (`while :; do cat PROMPT.md | claude-code ; done`)
+- [Ryan Carson](https://x.com/ryancarson/status/2008548371712135632) for the 3-layer learning system adaptation
 
 ---
 
@@ -904,4 +1038,4 @@ This would create adversarial samples that evade keyword detection and truly tes
 
 ---
 
-*Last updated: January 18, 2026*
+*Last updated: January 20, 2026*
