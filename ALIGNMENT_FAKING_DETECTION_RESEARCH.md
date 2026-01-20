@@ -684,13 +684,17 @@ while :; do cat PROMPT.md | claude-code ; done
 
 ### Results
 
-| Phase | AUROC | Method | Experiments |
-|-------|-------|--------|-------------|
-| Baseline | 0.70 | 4-stat + LogReg | 1 |
-| Architecture | 0.8342 | Binary+Log+ELU probe | 4 |
-| **Commander** | **0.9046** | Feature engineering + ExtraTrees | 10 seeds |
+| Phase | AUROC | Method | Guided by |
+|-------|-------|--------|-----------|
+| Baseline | 0.70 | 4-stat + LogReg | - |
+| Architecture | 0.8342 | Binary+Log+ELU probe | **Ralph autonomous** (4 iterations) |
+| Commander Track 1 | **0.9046** | Feature engineering + ExtraTrees | Human-guided |
+| Commander Track 2 | TBD | New feature discovery | **Claude autonomous** (in progress) |
 
-**+0.30 AUROC improvement** over baseline through autonomous research.
+**Key distinction:**
+- **Architecture phase (0.8342):** Ralph found Binary+Log+ELU autonomously in 4 tries. Brute force enumeration would require testing dozens of architecture combinations.
+- **Commander Track 1 (0.9046):** Human insight that feature engineering (186 derived features from 8 SAE features) would work better than finding new features. Verified across 10 seeds.
+- **Commander Track 2:** True autonomous test - Claude reasons each iteration, designs experiments, runs them, learns. Expected to validate or beat 0.9046 independently.
 
 ### Architecture Phase Discoveries
 
